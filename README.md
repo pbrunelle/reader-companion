@@ -18,7 +18,7 @@ Download a forked version of pdf.js. This is necessary because we get some error
 
 ```bash
 cd ..
-git clone https://github.com/pbrunell/pdf.js.git
+git clone https://github.com/pbrunelle/pdf.js.git
 cd pdf.js
 npm install
 # Do we also need `npm install url`?
