@@ -1,0 +1,8 @@
+{
+    "model": "gemini-1.5-flash",
+    "max_output_tokens": 1000,
+    "whole_pdf": true,
+    "system_prompt_no_whole_pdf": "The user is reading the PDF of a scientific paper. She needs your help to understand its contents. Here is a snippet from the paper that she wants you to explain",
+    "system_prompt_whole_pdf":  "The user is reading the PDF of a scientific paper. She needs your help to understand its contents. First she will provide the whole contents of the PDF document, one image per page. Then, she will either provide a snippet from the paper she wants you to explain, or she will ask you a question about the paper.",
+    "font_size": 12
+}
