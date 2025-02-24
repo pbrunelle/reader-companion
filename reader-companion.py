@@ -103,9 +103,10 @@ def get_pdf_images(pdf_path: str) -> list[str]:
         ret.append(pix_b64)
     return ret
 
-class CompanionReader(QMainWindow):
+class ReaderCompanion(QMainWindow):
     def __init__(self, pdf_viewer: str, filename: str, settings_file: str):
         super().__init__()
+        self.setWindowTitle("Reader Companion")
         self.pdf_viewer = os.path.abspath(pdf_viewer).replace("\\", "/")
         self.filename = os.path.abspath(filename)
         self.settings_file = settings_file
@@ -202,6 +203,6 @@ if __name__ == '__main__':
     app = QApplication([])
     args = parse_args()
     print(args)
-    window = CompanionReader(args.pdf_viewer, args.file, args.settings)
+    window = ReaderCompanion(args.pdf_viewer, args.file, args.settings)
     window.show()
     app.exec()
