@@ -26,7 +26,11 @@ class Gemini:
         self._httpx_client = httpx.Client()
         self._api_key = os.environ["GEMINI_API_KEY"]
 
-    def send(self, query: str, images: list[str] | None) -> dict[str, Any]:
+    def send(self, query: str, images: list[str] | None, history: list[dict[str, str]] | None) -> dict[str, Any]:
+        contents = []
+        if history:
+            for h in history:
+                contents.append({"role": h["role"], "parts": [{"text": h["text"]}]})
         parts = []
         if images:
             for pix in images:
@@ -38,6 +42,7 @@ class Gemini:
                 }
                 parts.append(d)
         parts.append({"text": query})
+        contents.append({"role": "user", "parts": parts})
         data = {
             "generationConfig": {
                 "max_output_tokens": self._max_output_tokens,
@@ -45,7 +50,7 @@ class Gemini:
             "system_instruction": {
                 "parts": {"text": self._system_prompt}
             },
-            "contents": {"parts": parts},
+            "contents": contents,
         }
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._model}:generateContent?key={self._api_key}"
         # print(f"Sending to Gemini: {url=} {data=}")
@@ -55,29 +60,34 @@ class Gemini:
         return response
 
 class GeminiWorker(QThread):
-    response_received = Signal(str)
+    response_received = Signal(str, str)
     error_occurred = Signal(str)
 
-    def __init__(self, text: str, pdf_images: list[str] | None, settings: dict[str, Any]):
+    def __init__(self, query: str, pdf_images: list[str] | None, settings: dict[str, Any], history: list[dict[str, str]] | None):
         super().__init__()
-        self.text = text
+        self.query = query
         self.pdf_images = pdf_images
         self.settings = settings
+        self.history = history
     
     def run(self):
         gemini = Gemini(
             model=self.settings["model"],
-            system_prompt=self.settings["system_prompt_whole_pdf"] if self.settings["whole_pdf"] else self.settings["system_prompt_no_whole_pdf"],
+            system_prompt=(
+                self.settings["system_prompt_whole_pdf"]
+                if self.settings["whole_pdf"]
+                else self.settings["system_prompt_no_whole_pdf"]
+            ),
             max_output_tokens=self.settings["max_output_tokens"],
         )
         try:
-            response = gemini.send(self.text, self.pdf_images).json()
+            response = gemini.send(self.query, self.pdf_images, self.history).json()
         except (httpx.HTTPError, json.decoder.JSONDecodeError) as e:
             self.error_occurred.emit(f"ERROR: {type(e)} {str(e)}")
             return
         try:
             text = response["candidates"][0]["content"]["parts"][0]["text"]
-            self.response_received.emit(text)
+            self.response_received.emit(self.query, text)
         except (KeyError, IndexError) as e:
             self.error_occurred.emit(f"ERROR: {type(e)} {str(e)} {response}")
         
@@ -102,6 +112,7 @@ class CompanionReader(QMainWindow):
         with open(settings_file, "rt") as f:
             settings = json.loads(f.read())
         self.pdf_images = None
+        self.history = None
         self.view = QWebEngineView(self)
         self.view.page().selectionChanged.connect(self.copy_to_input)
         self.input = QTextEdit()
@@ -159,14 +170,22 @@ class CompanionReader(QMainWindow):
                 print(f"Got {len(self.pdf_images)} pages {total_bytes} bytes")
         else:
             self.pdf_images = None
+        if settings["history"]:
+            if not self.history:
+                self.history = []
+        else:
+            self.history = None
         text = self.input.toPlainText()
-        self.thread = GeminiWorker(text, self.pdf_images, settings)
+        self.thread = GeminiWorker(text, self.pdf_images, settings, self.history)
         self.thread.response_received.connect(self.handle_gemini_response)
         self.thread.error_occurred.connect(self.handle_gemini_error)
         self.thread.start()
     
-    def handle_gemini_response(self, text):
+    def handle_gemini_response(self, query, text):
         self.output.setMarkdown(text)
+        if self.history is not None:
+            self.history.append({"text": query, "role": "user"})
+            self.history.append({"text": text, "role": "model"})
     
     def handle_gemini_error(self, err):
         self.output.setText(err)
