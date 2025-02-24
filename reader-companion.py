@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QSplitter
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal, QSettings, QEvent
 import httpx
 from typing import Any
 import json
@@ -107,6 +107,7 @@ class ReaderCompanion(QMainWindow):
     def __init__(self, pdf_viewer: str, filename: str, settings_file: str):
         super().__init__()
         self.setWindowTitle("Reader Companion")
+        self.qsettings = QSettings("PierreBrunelle", "ReaderCompanion")
         self.pdf_viewer = os.path.abspath(pdf_viewer).replace("\\", "/")
         self.filename = os.path.abspath(filename)
         self.settings_file = settings_file
@@ -128,12 +129,11 @@ class ReaderCompanion(QMainWindow):
         right_layout.addWidget(self.output, 7)
         right_widget = QWidget()
         right_widget.setLayout(right_layout)
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(self.view)
-        splitter.addWidget(right_widget)
-        splitter.setSizes([700, 300])
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.addWidget(self.view)
+        self.splitter.addWidget(right_widget)
         main_layout = QHBoxLayout()
-        main_layout.addWidget(splitter)
+        main_layout.addWidget(self.splitter)
         central = QWidget()
         central.setLayout(main_layout)
         self.setCentralWidget(central)
@@ -144,12 +144,27 @@ class ReaderCompanion(QMainWindow):
             self.input.setFont(font)
             self.send.setFont(font)
             self.output.setFont(font)
+        self.apply_qsettings()
         url = f"file:///{self.pdf_viewer}?file={self.filename}"
         print(f"{url=}")
         self.view.load(url)
-        self.showMaximized()
     
-    def get_settings(self):
+    def apply_qsettings(self) -> None:
+        geometry = self.qsettings.value("geometry", defaultValue=self.saveGeometry())
+        self.restoreGeometry(geometry)
+        splitter_sizes = self.qsettings.value("splitter_sizes", defaultValue=[700, 300], type=list)
+        self.splitter.setSizes([int(x) for x in splitter_sizes])
+
+    def save_qsettings(self) -> None:
+        self.qsettings.setValue("geometry", self.saveGeometry())
+        self.qsettings.setValue("splitter_sizes", self.splitter.sizes())
+        self.qsettings.sync()
+    
+    def closeEvent(self, event: QEvent) -> None:
+        self.save_qsettings()
+        return super().closeEvent(event)
+
+    def get_settings(self) -> dict[str, Any]:
         with open(self.settings_file, "rt") as f:
             return json.loads(f.read())
         
