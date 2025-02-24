@@ -3,6 +3,7 @@
 Ask questions to your LLM companion while reading PDFs.
 
 ![image](https://github.com/user-attachments/assets/861d7ecf-72ef-44eb-b3dc-def8e1c0443f)
+![image](https://github.com/user-attachments/assets/8606ac65-feba-46a7-875d-40139ea728dc)
 
 # Usage
 
