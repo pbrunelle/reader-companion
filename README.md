@@ -1,6 +1,8 @@
 # Reader Companion
 
-Ask your companion LLM questions while reading PDFs.
+Ask questions to your LLM companion while reading PDFs.
+
+![image](https://github.com/user-attachments/assets/861d7ecf-72ef-44eb-b3dc-def8e1c0443f)
 
 # Usage
 
