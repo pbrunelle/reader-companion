@@ -28,7 +28,7 @@ npm install
 
 ```bash
 export GEMINI_API_KEY=...
-python3 reader-companion.py  --pdf-viewer .../pdf.js/web/viewer.html --file examples/2404.16130v2.pdf --settings examples/settings.json
+python3 reader-companion.py  --pdf-viewer .../pdf.js --file examples/2404.16130v2.pdf --settings examples/settings.json
 ```
 
 ## Troubleshooting

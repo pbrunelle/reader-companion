@@ -147,7 +147,7 @@ class ReaderCompanion(QMainWindow):
             self.send.setFont(font)
             self.output.setFont(font)
         self.apply_qsettings()
-        url = f"file:///{self.pdf_viewer}?file={self.filename}"
+        url = f"file:///{self.pdf_viewer}/web/viewer.html?file={self.filename}"
         print(f"{url=}")
         self.view.load(url)
     
