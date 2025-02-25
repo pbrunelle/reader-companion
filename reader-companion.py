@@ -16,9 +16,9 @@ from pydantic import BaseModel
 from typing import Literal
 
 class AppSettings(BaseModel):
-    model: str = "gemini-1.5-flash"
+    model: str = "gemini-2.0-flash"
     max_output_tokens: int = 1000
-    history: bool = False
+    history: bool = True
     send_pdf: Literal["whole_images", "whole_pdf", "single_page", "false"] = "whole_images"
     system_prompt_no_whole_pdf: str
     system_prompt_whole_pdf: str
