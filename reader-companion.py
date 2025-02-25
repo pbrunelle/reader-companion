@@ -214,12 +214,11 @@ class ReaderCompanion(QMainWindow):
         central.setLayout(main_layout)
         self.setCentralWidget(central)
         app_settings = self.get_settings()
-        if "font_size" in app_settings:
-            font = self.input.font()
-            font.setPointSize(app_settings["font_size"])
-            self.input.setFont(font)
-            self.send.setFont(font)
-            self.output.setFont(font)
+        font = self.input.font()
+        font.setPointSize(app_settings.font_size)
+        self.input.setFont(font)
+        self.send.setFont(font)
+        self.output.setFont(font)
         self.apply_qsettings()
         url = f"file:///{self.pdf_viewer}/web/viewer.html?file={self.filename}"
         print(f"{url=}")
