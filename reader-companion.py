@@ -117,6 +117,8 @@ class ReaderCompanion(QMainWindow):
         self.history = None
         self.view = QWebEngineView(self)
         self.view.page().selectionChanged.connect(self.copy_to_input)
+        self.view.page().loadFinished.connect(self.set_sidebar_status)
+        self.sidebar_open = None
         self.input = QTextEdit()
         self.input.setPlaceholderText("Select from PDF or type here ...")
         self.send = QPushButton("Ask Your Reader Companion")
@@ -154,14 +156,32 @@ class ReaderCompanion(QMainWindow):
         self.restoreGeometry(geometry)
         splitter_sizes = self.qsettings.value("splitter_sizes", defaultValue=[700, 300], type=list)
         self.splitter.setSizes([int(x) for x in splitter_sizes])
+        self.sidebar_open = self.qsettings.value("sidebar_open", defaultValue=None, type=int)
 
     def save_qsettings(self) -> None:
         self.qsettings.setValue("geometry", self.saveGeometry())
         self.qsettings.setValue("splitter_sizes", self.splitter.sizes())
+        if self.sidebar_open is not None:
+            self.qsettings.setValue("sidebar_open", self.sidebar_open)
         self.qsettings.sync()
     
-    def closeEvent(self, event: QEvent) -> None:
+    def get_sidebar_status_then_save(self) -> None:
+        self.view.page().runJavaScript("PDFViewerApplication.pdfSidebar.isOpen", self.handle_get_sidebar_status_then_save)
+    
+    def handle_get_sidebar_status_then_save(self, result) -> None:
+        self.sidebar_open = int(result)
         self.save_qsettings()
+
+    def set_sidebar_status(self) -> None:
+        if self.sidebar_open is not None:
+            js = f"PDFViewerApplicationOptions.set('sidebarViewOnLoad', {int(self.sidebar_open)})"
+            self.view.page().runJavaScript(js, self.handle_set_sidebar_status)
+
+    def handle_set_sidebar_status(self, result) -> None:
+        pass
+
+    def closeEvent(self, event: QEvent) -> None:
+        self.get_sidebar_status_then_save()
         return super().closeEvent(event)
 
     def get_settings(self) -> dict[str, Any]:
