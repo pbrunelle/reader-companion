@@ -12,6 +12,17 @@ import fitz
 import base64
 import os  
 import argparse
+from pydantic import BaseModel
+from typing import Literal
+
+class AppSettings(BaseModel):
+    model: str = "gemini-1.5-flash"
+    max_output_tokens: int = 1000
+    history: bool = False
+    send_pdf: Literal["whole_images", "whole_pdf", "single_page", "false"] = "whole_images"
+    system_prompt_no_whole_pdf: str
+    system_prompt_whole_pdf: str
+    font_size: int = 12
 
 class Gemini:
     def __init__(
@@ -23,10 +34,16 @@ class Gemini:
         self._model = model
         self._system_prompt = system_prompt
         self._max_output_tokens = max_output_tokens
-        self._httpx_client = httpx.Client()
+        self._httpx_client = httpx.Client(timeout=30)
         self._api_key = os.environ["GEMINI_API_KEY"]
 
-    def send(self, query: str, images: list[str] | None, history: list[dict[str, str]] | None) -> dict[str, Any]:
+    def send(
+        self,
+        query: str,
+        images: list[str] | None,
+        pdf_uploaded_file_uri: str | None,
+        history: list[dict[str, str]] | None
+    ) -> dict[str, Any]:
         contents = []
         if history:
             for h in history:
@@ -41,6 +58,14 @@ class Gemini:
                     }
                 }
                 parts.append(d)
+        if pdf_uploaded_file_uri:
+            d = {
+                "file_data": {
+                    "mime_type": f"application/pdf",
+                    "file_uri": pdf_uploaded_file_uri,
+                }
+            }
+            parts.append(d)
         parts.append({"text": query})
         contents.append({"role": "user", "parts": parts})
         data = {
@@ -53,7 +78,7 @@ class Gemini:
             "contents": contents,
         }
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._model}:generateContent?key={self._api_key}"
-        # print(f"Sending to Gemini: {url=} {data=}")
+        print(f"Prompting Gemini: {url=} {len(str(data))=} {len(contents)=}")
         response = self._httpx_client.post(url, json=data)
         print(f"Received response: {response=} {response.json()=}")
         response.raise_for_status()
@@ -63,25 +88,33 @@ class GeminiWorker(QThread):
     response_received = Signal(str, str)
     error_occurred = Signal(str)
 
-    def __init__(self, query: str, pdf_images: list[str] | None, settings: dict[str, Any], history: list[dict[str, str]] | None):
+    def __init__(
+        self, 
+        query: str, 
+        pdf_images: list[str] | None,
+        pdf_uploaded_file_uri: str | None,
+        app_settings: AppSettings,
+        history: list[dict[str, str]] | None,
+    ):
         super().__init__()
         self.query = query
         self.pdf_images = pdf_images
-        self.settings = settings
+        self.pdf_uploaded_file_uri = pdf_uploaded_file_uri
+        self.app_settings = app_settings
         self.history = history
     
     def run(self):
         gemini = Gemini(
-            model=self.settings["model"],
+            model=self.app_settings.model,
             system_prompt=(
-                self.settings["system_prompt_whole_pdf"]
-                if self.settings["whole_pdf"]
-                else self.settings["system_prompt_no_whole_pdf"]
+                self.app_settings.system_prompt_whole_pdf
+                if self.app_settings.send_pdf in ("whole_images", "whole_pdf")
+                else self.app_settings.system_prompt_no_whole_pdf
             ),
-            max_output_tokens=self.settings["max_output_tokens"],
+            max_output_tokens=self.app_settings.max_output_tokens,
         )
         try:
-            response = gemini.send(self.query, self.pdf_images, self.history).json()
+            response = gemini.send(self.query, self.pdf_images, self.pdf_uploaded_file_uri, self.history).json()
         except (httpx.HTTPError, json.decoder.JSONDecodeError) as e:
             self.error_occurred.emit(f"ERROR: {type(e)} {str(e)}")
             return
@@ -90,7 +123,45 @@ class GeminiWorker(QThread):
             self.response_received.emit(self.query, text)
         except (KeyError, IndexError) as e:
             self.error_occurred.emit(f"ERROR: {type(e)} {str(e)} {response}")
-        
+
+def upload_pdf_to_goole(filename: str) -> str:
+    api_key = os.environ["GEMINI_API_KEY"]
+    with open(filename, "rb") as f:
+        pdf_bytes = f.read()
+    num_bytes = len(pdf_bytes)
+    # Initial resumable request defining metadata.
+    url = f"https://generativelanguage.googleapis.com/upload/v1beta/files?key={api_key}"
+    d = {
+        "file": {
+            "display_name": "TEXT",
+        }
+    }
+    headers = {
+        "X-Goog-Upload-Protocol": "resumable",
+        "X-Goog-Upload-Command": "start",
+        "X-Goog-Upload-Header-Content-Length": str(num_bytes),
+        "X-Goog-Upload-Header-Content-Type": "application/pdf",
+    }
+    print(f"Sending: {url=} {d=} {headers=}")
+    response = httpx.post(url, headers=headers, json=d)
+    print(f"Received: {response=} {response.content=} {response.headers=}")
+    response.raise_for_status()
+    # Get URL to upload to
+    url = response.headers["x-goog-upload-url"]
+    # Upload the actual bytes
+    headers = {
+        "Content-Length": str(num_bytes),
+        "X-Goog-Upload-Offset": "0",
+        "X-Goog-Upload-Command": "upload, finalize",
+    }
+    print(f"Sending: {url=} {headers=}")
+    response = httpx.post(url, headers=headers, content=pdf_bytes)
+    print(f"Received: {response=} {response.content=} {response.headers=}")
+    response.raise_for_status()
+    d = response.json()
+    file_uri = d["file"]["uri"]
+    return file_uri
+    
 def get_pdf_images(pdf_path: str) -> list[str]:
     """From a PDF document converts all of its pages tp images and return the b64 encoding, one per page."""
     ret = []
@@ -103,6 +174,10 @@ def get_pdf_images(pdf_path: str) -> list[str]:
         ret.append(pix_b64)
     return ret
 
+def get_pdf_bytes(pdf_path: str) -> bytes:
+    with open(pdf_path, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
+
 class ReaderCompanion(QMainWindow):
     def __init__(self, pdf_viewer: str, filename: str, settings_file: str):
         super().__init__()
@@ -111,9 +186,8 @@ class ReaderCompanion(QMainWindow):
         self.pdf_viewer = os.path.abspath(pdf_viewer).replace("\\", "/")
         self.filename = os.path.abspath(filename)
         self.settings_file = settings_file
-        with open(settings_file, "rt") as f:
-            settings = json.loads(f.read())
         self.pdf_images = None
+        self.pdf_uploaded_file_uri = None
         self.history = None
         self.view = QWebEngineView(self)
         self.view.page().selectionChanged.connect(self.copy_to_input)
@@ -139,10 +213,10 @@ class ReaderCompanion(QMainWindow):
         central = QWidget()
         central.setLayout(main_layout)
         self.setCentralWidget(central)
-        settings = self.get_settings()
-        if "font_size" in settings:
+        app_settings = self.get_settings()
+        if "font_size" in app_settings:
             font = self.input.font()
-            font.setPointSize(settings["font_size"])
+            font.setPointSize(app_settings["font_size"])
             self.input.setFont(font)
             self.send.setFont(font)
             self.output.setFont(font)
@@ -184,9 +258,9 @@ class ReaderCompanion(QMainWindow):
         self.get_sidebar_status_then_save()
         return super().closeEvent(event)
 
-    def get_settings(self) -> dict[str, Any]:
+    def get_settings(self) -> AppSettings:            
         with open(self.settings_file, "rt") as f:
-            return json.loads(f.read())
+            return AppSettings.model_validate_json(f.read())
         
     def copy_to_input(self):
         self.view.page().runJavaScript("window.getSelection().toString();", self.set_text_input)
@@ -197,8 +271,8 @@ class ReaderCompanion(QMainWindow):
 
     def send_to_gemini(self, *args, **kwargs):
         self.output.setText("Waiting ...")
-        settings = self.get_settings()
-        if settings["whole_pdf"]:
+        app_settings = self.get_settings()
+        if app_settings.send_pdf == "whole_images":
             if not self.pdf_images:
                 print("Getting PDF images once")
                 self.pdf_images = get_pdf_images(self.filename)
@@ -206,13 +280,19 @@ class ReaderCompanion(QMainWindow):
                 print(f"Got {len(self.pdf_images)} pages {total_bytes} bytes")
         else:
             self.pdf_images = None
-        if settings["history"]:
+        if app_settings.send_pdf == "whole_pdf":
+            if not self.pdf_uploaded_file_uri:
+                print("Uploading PDF to Google once")
+                self.pdf_uploaded_file_uri = upload_pdf_to_goole(self.filename)
+        else:
+            self.pdf_uploaded_file_uri = None
+        if app_settings.history:
             if not self.history:
                 self.history = []
         else:
             self.history = None
         text = self.input.toPlainText()
-        self.thread = GeminiWorker(text, self.pdf_images, settings, self.history)
+        self.thread = GeminiWorker(text, self.pdf_images, self.pdf_uploaded_file_uri, app_settings, self.history)
         self.thread.response_received.connect(self.handle_gemini_response)
         self.thread.error_occurred.connect(self.handle_gemini_error)
         self.thread.start()
